@@ -4,6 +4,8 @@
 
 SMArchitecture is a Streamlit-based app that helps you **analyze functional requirements** through **embeddings** and **unsupervised clustering**, revealing potential architectural boundaries.
 
+
+The app is deployed under: [https://smarchitecture.streamlit.app/](https://smarchitecture.streamlit.app/)
 ---
 
 ## 🚀 Features
