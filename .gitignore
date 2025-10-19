@@ -1,0 +1,73 @@
+# =====================================
+# Python
+# =====================================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+MANIFEST
+
+# Logs & caches
+*.log
+*.tmp
+*.cache/
+.cache/
+*.pkl
+*.sqlite
+*.db
+
+# =====================================
+# Streamlit
+# =====================================
+.streamlit/secrets.toml
+.streamlit/config.toml
+.streamlit/static/
+# Streamlit session and upload caches
+.streamlit/
+.streamlit_cache/
+
+# =====================================
+# Chroma vector database
+# =====================================
+chroma_store/
+chroma.db/
+*.chroma
+
+# =====================================
+# Jupyter / Notebooks
+# =====================================
+.ipynb_checkpoints/
+*.ipynb_save
+
+# =====================================
+# IDE / Editor
+# =====================================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# =====================================
+# System
+# =====================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =====================================
+# Project-specific
+# =====================================
+# Ignore requirements auto exports if generated dynamically
+requirements-lock.txt

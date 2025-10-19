@@ -1,79 +1,44 @@
 import streamlit as st
 import pandas as pd
 
-# ---------- PAGE CONFIG ----------
 st.set_page_config(
-    page_title="Requirement Analyzer",
-    page_icon="🔍",
-    layout="wide",
+    page_title="Getting Started",
+    page_icon="🚀",
+    layout="wide"
 )
 
-# ---------- HEADER ----------
-st.title("🔍 Requirement Analyzer")
-
+st.title("🚀 Getting Started")
 st.markdown("""
-Welcome to the **Requirement Analyzer** — a tool to help you **analyze and structure software requirements** 
-based on their semantic similarity.
+Welcome to **SMArchitecture** — a tool for **semantic analysis and clustering of software requirements** to support early **architecture discovery**.
 
-Instead of manually grouping requirements, this app uses **language embeddings** and **automatic clustering** to reveal
-emerging **themes or design areas**.  
-These clusters can guide early **architectural decisions**, such as identifying modules, subsystems, or bounded contexts.
-""")
+---
 
-st.divider()
+### 🧭 What this app does
 
-# ---------- HOW IT WORKS ----------
-st.header("⚙️ How It Works")
+This app helps you:
+1. **Manage and import requirements** (manually, from CSV, or Gherkin feature files).  
+2. **Generate embeddings** using local language models (no OpenAI key required).  
+3. **Cluster semantically similar requirements** to discover potential architectural components.  
+4. **Visualize embeddings** and observe emerging groups that hint at design boundaries.
 
-st.markdown("""
-1. **Input Requirements**  
-   Add or import your requirements via the **🧾 Manage Requirements** page.  
-   You can also load an example dataset below.
+You can switch between **pages** in the sidebar:
+- 🧩 **Manage Requirements:** Add, import, or export requirements.  
+- 🔍 **Analyze Requirements:** Generate embeddings, cluster, and visualize results.
 
-2. **Embedding Generation & Vector Storage**  
-   The app converts each requirement into a high-dimensional vector using a **Sentence Transformer model**.  
-   These embeddings are stored locally in **ChromaDB**, a lightweight, persistent vector database.
+---
 
-3. **Semantic Clustering**  
-   ChromaDB groups semantically similar requirements using **vector similarity search**.  
-   Each group represents a **potential component** or **bounded context**.
+### ⚙️ How to use
 
-4. **Naming the Components**  
-   The app analyzes key terms in each cluster to **suggest a name** —  
-   which you can refine to describe the architecture's emerging structure.
-""")
+1. Go to **Manage Requirements** and enter or import your functional requirements.  
+2. Navigate to **Analyze Requirements**.  
+3. Click **Generate Embeddings** — the app will compute vector representations for each requirement.  
+4. Choose a clustering method (DBSCAN, HDBSCAN, or Agglomerative) and adjust sensitivity.  
+5. Explore the 2D visualization to identify related requirement groups.  
+6. Use the emerging clusters to propose **system components** or **design boundaries**.
 
-st.success("This workflow mirrors the EarlyBird design thinking process: from text → semantics → structure.")
+---
 
-st.divider()
-
-# ---------- GETTING STARTED ----------
-st.header("🚀 Getting Started")
-
-st.markdown("""
-### Step-by-step
-
-1. **Go to “🧾 Manage Requirements”** in the sidebar.  
-   - Add requirements manually  
-   - Or import them from a CSV or Gherkin `.feature` file  
-2. **Then open “📊 Analyze Requirements.”**  
-   - Select an embedding model  
-   - Adjust the *minimum cluster size* (optional)  
-   - Click **Run Analysis**  
-3. Review the discovered clusters, rename them meaningfully, and export results to CSV.
-
-### Why use clustering for design?
-- Groups of related requirements often correspond to **potential architectural modules**
-- Helps identify **redundant** or **conflicting** requirements
-- Reveals **natural domains** in complex systems
-""")
-
-st.divider()
-
-# ---------- EXAMPLE ----------
-st.header("🍕 Example: Pizza Delivery App Requirements")
-
-st.markdown("""
+### 🍕 Example: Pizza Delivery
 Here’s an example set of mixed functional and non-functional requirements for a fictional pizza delivery system.  
 You can load these into the app and run the analysis immediately.
 """)

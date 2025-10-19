@@ -1,185 +1,154 @@
+# pages/2_Analyze_Requirements.py
 import streamlit as st
-import chromadb
-from sentence_transformers import SentenceTransformer
-import numpy as np
 import pandas as pd
-from sklearn.cluster import DBSCAN, AgglomerativeClustering
-from sklearn.metrics.pairwise import cosine_distances
-from sklearn.manifold import TSNE
+import numpy as np
 import plotly.express as px
+from sentence_transformers import SentenceTransformer
+from sklearn.cluster import AgglomerativeClustering, KMeans, DBSCAN
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.manifold import TSNE
+import chromadb
 import os
 
-# --------------------------------------------------------
-# Page configuration
-# --------------------------------------------------------
-st.set_page_config(page_title="Analyze Requirements", page_icon="🧠", layout="wide")
-st.title("🧠 Analyze & Cluster Requirements")
+st.set_page_config(page_title="Analyze Requirements", layout="wide")
+st.title("🔍 Analyze and Cluster Requirements")
 
 st.markdown("""
-This page analyzes the previously entered requirements and groups them into **functional clusters**.
-Each cluster often represents a potential **component or subsystem** in your system architecture.
-Adjust clustering sensitivity below to explore how requirements group together.
+This page clusters requirements using local embeddings and several clustering algorithms.
+It also shows the generated embeddings if requested.
 """)
 
-# --------------------------------------------------------
-# Load requirements from session state or file
-# --------------------------------------------------------
-if "requirements" not in st.session_state or len(st.session_state["requirements"]) == 0:
-    st.warning("⚠️ No requirements found. Please add or import them first on the **Manage Requirements** page.")
+# Sidebar controls
+st.sidebar.header("Settings")
+embedding_model_name = st.sidebar.selectbox("Embedding model", ["all-MiniLM-L6-v2", "paraphrase-MiniLM-L12-v2"])
+clustering_method = st.sidebar.selectbox("Clustering algorithm", ["Agglomerative", "KMeans", "DBSCAN"])
+sensitivity = st.sidebar.slider("Sensitivity (lower = broader clusters)", 0.1, 1.0, 0.4, 0.05)
+show_embeddings = st.sidebar.checkbox("Show embedding vectors", False)
+
+# Load requirements from session
+if "requirements" not in st.session_state or not st.session_state.requirements:
+    st.warning("No requirements found. Please add/import them in Manage Requirements first.")
     st.stop()
 
-reqs = st.session_state["requirements"]
+reqs = st.session_state.requirements
 texts = [r["text"] for r in reqs]
+ids = [r["id"] for r in reqs]
 
-# --------------------------------------------------------
-# Initialize vector DB (Chroma)
-# --------------------------------------------------------
-chroma_path = os.path.join(os.getcwd(), "chroma_store")
-os.makedirs(chroma_path, exist_ok=True)
+# Generate embeddings
+st.info("Generating embeddings (SentenceTransformer)...")
+model = SentenceTransformer(embedding_model_name)
+embeddings = model.encode(texts, show_progress_bar=False)
+embeddings = np.array(embeddings)
 
-chroma_client = chromadb.PersistentClient(path=chroma_path)
-collection_name = "requirements"
+if embeddings.size == 0:
+    st.error("Embedding generation returned no vectors.")
+    st.stop()
 
-# Get or create collection
+if show_embeddings:
+    st.subheader("Generated embeddings")
+    df_emb = pd.DataFrame(embeddings, index=ids)
+    st.dataframe(df_emb)
+
+# Setup Chroma (local)
+chroma_dir = os.path.join(os.getcwd(), "chroma_store")
+os.makedirs(chroma_dir, exist_ok=True)
+client = chromadb.PersistentClient(path=chroma_dir)
+
+collection_name = "req_collection"
+# get or create collection
 try:
-    collection = chroma_client.get_collection(collection_name)
+    collection = client.get_collection(collection_name)
 except Exception:
-    collection = chroma_client.create_collection(collection_name)
+    collection = client.create_collection(collection_name)
 
-# Clear old entries safely
-existing = collection.count()
-if existing > 0:
-    all_ids = [r["id"] for r in reqs]
-    try:
+# --- Safe deletion of existing items in collection ---
+try:
+    # collection.get returns dict with "ids" in many versions
+    existing = collection.get(include=["ids"])
+    all_ids = existing.get("ids", []) if isinstance(existing, dict) else []
+    # if no ids key, try collection.count() and skip deletion if zero
+    if not all_ids:
+        # Some chorma versions return empty lists differently; attempt a count
+        try:
+            if collection.count() == 0:
+                all_ids = []
+        except Exception:
+            all_ids = []
+    if all_ids:
         collection.delete(ids=all_ids)
+except Exception:
+    # If deletion fails for any reason, continue without breaking the UI.
+    # We don't want delete semantics to block clustering.
+    st.warning("Could not clear vector collection (compatibility); continuing and possibly appending.")
+
+# Add current items
+try:
+    # prefer to replace: if exists remove same ids first
+    # attempt to delete same ids to avoid duplicates
+    try:
+        collection.delete(ids=ids)
     except Exception:
         pass
+    collection.add(ids=ids, embeddings=embeddings.tolist(), documents=texts)
+except Exception as e:
+    st.warning(f"Chroma add failed: {e}")
 
-# --------------------------------------------------------
-# Load embedding model
-# --------------------------------------------------------
-with st.spinner("Loading embedding model (this may take a few seconds)..."):
-    model = SentenceTransformer("all-MiniLM-L6-v2")
+# Choose clustering
+st.info(f"Running clustering algorithm: {clustering_method}")
 
-# --------------------------------------------------------
-# Generate embeddings
-# --------------------------------------------------------
-with st.spinner("Generating embeddings for requirements..."):
-    embeddings = model.encode(texts, show_progress_bar=True)
-    embeddings = np.array(embeddings)
+if clustering_method == "Agglomerative":
+    # Use cosine similarity -> distance, and map sensitivity to distance_threshold
+    sim = cosine_similarity(embeddings)
+    dist = 1 - sim
+    distance_threshold = float(np.quantile(dist, 1 - sensitivity))
+    clusterer = AgglomerativeClustering(n_clusters=None,
+                                        metric="cosine",
+                                        linkage="average",
+                                        distance_threshold=distance_threshold)
+    labels = clusterer.fit_predict(embeddings)
 
-if len(embeddings) == 0:
-    st.error("No embeddings were generated — please check your requirements.")
+elif clustering_method == "KMeans":
+    # number of clusters derived from sensitivity and dataset size
+    n_clusters = max(2, int(len(embeddings) * sensitivity))
+    clusterer = KMeans(n_clusters=n_clusters, n_init="auto", random_state=42)
+    labels = clusterer.fit_predict(embeddings)
+
+elif clustering_method == "DBSCAN":
+    # DBSCAN eps heuristic: scale by median pairwise distance
+    sim = cosine_similarity(embeddings)
+    dist = 1 - sim
+    median_dist = float(np.median(dist))
+    # make eps larger for less sensitivity; inverse mapping
+    eps = max(0.1, median_dist * (1.0 + (1.0 - sensitivity) * 5.0))
+    clusterer = DBSCAN(eps=eps, min_samples=2, metric="cosine")
+    labels = clusterer.fit_predict(embeddings)
+else:
+    st.error("Unknown clustering algorithm")
     st.stop()
 
-# Add to Chroma
-try:
-    collection.add(
-        ids=[r["id"] for r in reqs],
-        embeddings=embeddings.tolist(),
-        documents=texts,
-    )
-except ValueError:
-    st.error("Failed to add embeddings to vector DB. Try reloading the page.")
-    st.stop()
+# Build results DataFrame
+df = pd.DataFrame({"id": ids, "requirement": texts, "cluster": labels})
 
-st.success(f"✅ Added {len(reqs)} requirements to vector database.")
+# 2D projection for visualization
+st.subheader("Cluster visualization (t-SNE)")
+perplex = min(30, max(5, len(embeddings)//3))
+reduced = TSNE(n_components=2, random_state=42, perplexity=perplex).fit_transform(embeddings)
+df["x"], df["y"] = reduced[:, 0], reduced[:, 1]
 
-# --------------------------------------------------------
-# Clustering with adaptive sensitivity
-# --------------------------------------------------------
-st.subheader("🔍 Clustering Settings")
-
-dist_matrix = cosine_distances(embeddings)
-median_distance = float(np.median(dist_matrix))
-default_eps = round(median_distance * 2.5, 3)
-
-eps = st.slider(
-    "📏 Clustering Sensitivity (DBSCAN ε)",
-    min_value=0.05,
-    max_value=2.0,
-    step=0.05,
-    value=default_eps,
-    help="Lower values → more clusters (stricter similarity). Higher → fewer clusters."
-)
-min_samples = st.slider("👥 Minimum samples per cluster", 2, 5, 2)
-
-st.write(f"Using eps = {eps}, min_samples = {min_samples}")
-
-with st.spinner("Performing clustering..."):
-    clusterer = DBSCAN(eps=eps, min_samples=min_samples, metric="cosine")
-    cluster_labels = clusterer.fit_predict(embeddings)
-
-num_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
-
-if num_clusters <= 1:
-    st.warning("Only one cluster detected — trying more sensitive fallback (Agglomerative)...")
-    clusterer = AgglomerativeClustering(n_clusters=None, distance_threshold=0.6)
-    cluster_labels = clusterer.fit_predict(embeddings)
-    num_clusters = len(set(cluster_labels))
-
-st.success(f"✅ Found {num_clusters} clusters (plus possible outliers).")
-
-# --------------------------------------------------------
-# Visualize with t-SNE
-# --------------------------------------------------------
-st.subheader("📊 Visualizing Requirement Clusters")
-st.write("Reducing dimensionality for visualization...")
-
-tsne = TSNE(
-    n_components=2,
-    random_state=42,
-    perplexity=min(10, len(embeddings) - 1),
-    init="pca",
-    learning_rate="auto"
-)
-reduced = tsne.fit_transform(embeddings)
-
-df = pd.DataFrame(reduced, columns=["x", "y"])
-df["requirement"] = texts
-df["cluster"] = cluster_labels
-
-fig = px.scatter(
-    df,
-    x="x",
-    y="y",
-    color=df["cluster"].astype(str),
-    text="requirement",
-    title=f"Requirement Clusters (ε={eps}, clusters={num_clusters})",
-    color_discrete_sequence=px.colors.qualitative.Vivid,
-)
-fig.update_traces(
-    textposition="top center",
-    marker=dict(size=10, line=dict(width=1, color="DarkSlateGrey"))
-)
+fig = px.scatter(df, x="x", y="y", color=df["cluster"].astype(str),
+                 hover_data=["id", "requirement"], title=f"Clusters ({clustering_method})")
+fig.update_traces(marker=dict(size=10, line=dict(width=1, color="DarkSlateGrey")))
 st.plotly_chart(fig, use_container_width=True)
 
-# --------------------------------------------------------
-# Cluster Overview
-# --------------------------------------------------------
-st.write("### 🧩 Cluster Overview")
+# Show cluster lists
+st.subheader("Cluster details")
+for cid in sorted(df["cluster"].unique()):
+    st.markdown(f"### 🧩 Cluster {cid}")
+    items = df[df["cluster"] == cid][["id", "requirement"]].values.tolist()
+    for i, req in items:
+        st.markdown(f"- **{i}**: {req}")
+    st.markdown("---")
 
-cluster_map = {}
-for cluster_id in sorted(set(cluster_labels)):
-    if cluster_id == -1:
-        st.subheader("❓ Outliers (unclustered requirements)")
-    else:
-        st.subheader(f"Cluster {cluster_id} – Suggested Component Name:")
-        suggested_name = f"Component_{cluster_id}"
-        new_name = st.text_input(
-            f"✏️ Name for Cluster {cluster_id}",
-            value=suggested_name,
-            key=f"name_{cluster_id}"
-        )
-        st.write(f"**Proposed Component:** {new_name}")
-        cluster_map[cluster_id] = new_name
-
-    cluster_reqs = [texts[i] for i in range(len(texts)) if cluster_labels[i] == cluster_id]
-    for r in cluster_reqs:
-        st.markdown(f"- {r}")
-
-# Save cluster results
-st.session_state["cluster_labels"] = cluster_labels.tolist()
-st.session_state["cluster_map"] = cluster_map
-
-st.info("You can adjust ε (sensitivity) and rerun clustering to explore different architectural groupings.")
+# Download CSV
+csv = df.to_csv(index=False).encode("utf-8")
+st.download_button("Download clusters as CSV", data=csv, file_name="clusters.csv", mime="text/csv")
